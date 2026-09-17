@@ -42,6 +42,12 @@ image="autodeploy/$project:$release_id"
 candidate="autodeploy-$project-candidate-$release_id"
 final_container="autodeploy-$project"
 domain="$project.$BASE_DOMAIN"
+scheme="https"
+site_address="$domain"
+if [[ "${LOCAL_MODE:-0}" == "1" ]]; then
+  scheme="http"
+  site_address="http://$domain"
+fi
 caddy_file="/etc/caddy/apps/$project.caddy"
 caddy_backup="$caddy_file.backup-$release_id"
 caddy_temp="$caddy_file.tmp-$release_id"
@@ -91,7 +97,7 @@ if [[ -f "$caddy_file" ]]; then
 fi
 
 cat > "$caddy_temp" <<CADDY
-$domain {
+$site_address {
     encode zstd gzip
     reverse_proxy 127.0.0.1:$port
 }
@@ -136,4 +142,4 @@ for old_release in "${old_releases[@]}"; do
   [[ "$old_release" == "$project_root/releases/"* ]] && rm -rf -- "$old_release"
 done
 
-printf '{"ok":true,"message":"Deployment berhasil.","project":"%s","release":"%s","url":"https://%s"}\n'   "$project" "$release_id" "$domain"
+printf '{"ok":true,"message":"Deployment berhasil.","project":"%s","release":"%s","url":"%s://%s"}\n'   "$project" "$release_id" "$scheme" "$domain"
