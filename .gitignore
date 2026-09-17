@@ -1,0 +1,19 @@
+# Secret dan konfigurasi lokal
+.env
+.env.*
+!.env.example
+
+# Paket deployment
+application.zip
+*.zip
+
+# Log dan cache
+*.log
+.cache/
+tmp/
+
+# Editor dan sistem operasi
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
