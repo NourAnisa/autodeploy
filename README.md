@@ -31,6 +31,19 @@ flowchart LR
 - Secret/token dan validasi input
 - Health check, log, dan rollback sederhana
 
+## Cara tercepat: demo gratis di VirtualBox
+
+Tidak perlu membeli VPS. Siapkan Ubuntu Server 24.04 di VirtualBox, kemudian jalankan:
+
+```bash
+git clone https://github.com/NourAnisa/autodeploy.git
+cd autodeploy
+sudo bash server/install-local.sh
+bash examples/deploy-local.sh demo-app examples/php-native
+```
+
+Panduan lengkap: [Demo gratis dengan VirtualBox](docs/VIRTUALBOX.md).
+
 ## Kebutuhan
 
 ### VPS
@@ -113,16 +126,19 @@ Sebelum dipakai sebagai layanan publik, tambahkan akun/token per mahasiswa, audi
 ├── README.md
 ├── server
 │   ├── install.sh
+│   ├── install-local.sh
 │   ├── public/deploy.php
 │   ├── bin/autodeploy-project
 │   └── templates/php-native/Dockerfile
 └── examples
+    ├── deploy-local.sh
     ├── workflows/deploy.yml
     └── php-native/index.php
 ```
 
 ## Bahan ajar
 
+- [Demo gratis dengan VirtualBox](docs/VIRTUALBOX.md)
 - [Modul praktikum lengkap](docs/PRAKTIKUM.md)
 - [Panduan troubleshooting](docs/TROUBLESHOOTING.md)
 
