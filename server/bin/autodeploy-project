@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+
+if [[ "$#" -ne 4 ]]; then
+  echo '{"ok":false,"message":"Argumen runner tidak lengkap."}'
+  exit 64
+fi
+
+project="$1"
+archive="$2"
+branch="$3"
+commit="$4"
+
+if [[ ! "$project" =~ ^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$ ]]; then
+  echo '{"ok":false,"message":"Nama proyek tidak valid."}'
+  exit 65
+fi
+
+if [[ ! -f "$archive" || "$archive" != /srv/autodeploy/uploads/*.zip ]]; then
+  echo '{"ok":false,"message":"Lokasi artifact tidak valid."}'
+  exit 66
+fi
+
+# shellcheck disable=SC1091
+source /etc/autodeploy/config
+
+if [[ -z "${BASE_DOMAIN:-}" || ! "$BASE_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then
+  echo '{"ok":false,"message":"BASE_DOMAIN belum benar."}'
+  exit 78
+fi
+
+short_commit="${commit:0:12}"
+if [[ "$short_commit" == "unknown" ]]; then
+  short_commit="manual"
+fi
+
+release_id="$(date -u +%Y%m%d%H%M%S)-$short_commit"
+project_root="/srv/autodeploy/projects/$project"
+release_dir="$project_root/releases/$release_id"
+image="autodeploy/$project:$release_id"
+candidate="autodeploy-$project-candidate-$release_id"
+final_container="autodeploy-$project"
+domain="$project.$BASE_DOMAIN"
+caddy_file="/etc/caddy/apps/$project.caddy"
+caddy_backup="$caddy_file.backup-$release_id"
+caddy_temp="$caddy_file.tmp-$release_id"
+log_file="/srv/autodeploy/logs/deployments.log"
+
+mkdir -p "$release_dir"
+unzip -q "$archive" -d "$release_dir"
+
+if [[ ! -f "$release_dir/index.php" && ! -f "$release_dir/index.html" ]]; then
+  echo '{"ok":false,"message":"Artifact harus memiliki index.php atau index.html pada direktori utama."}'
+  exit 67
+fi
+
+cleanup_candidate() {
+  docker rm -f "$candidate" >/dev/null 2>&1 || true
+  rm -f "$caddy_temp"
+}
+trap cleanup_candidate ERR
+
+docker build   --file /srv/autodeploy/templates/php-native/Dockerfile   --tag "$image"   "$release_dir"
+
+docker run -d   --name "$candidate"   --restart unless-stopped   --memory 256m   --cpus 0.50   --pids-limit 128   --security-opt no-new-privileges:true   --label "autodeploy.project=$project"   --label "autodeploy.release=$release_id"   --publish 127.0.0.1::80   "$image" >/dev/null
+
+port="$(docker port "$candidate" 80/tcp | awk -F: 'NR==1 {print $NF}')"
+if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+  echo '{"ok":false,"message":"Port container tidak ditemukan."}'
+  exit 68
+fi
+
+healthy=0
+for _ in {1..20}; do
+  if curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:$port/" >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$healthy" -ne 1 ]]; then
+  docker logs "$candidate" >&2 || true
+  echo '{"ok":false,"message":"Health check aplikasi gagal."}'
+  exit 69
+fi
+
+if [[ -f "$caddy_file" ]]; then
+  cp "$caddy_file" "$caddy_backup"
+fi
+
+cat > "$caddy_temp" <<CADDY
+$domain {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:$port
+}
+CADDY
+
+mv "$caddy_temp" "$caddy_file"
+
+if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+  if [[ -f "$caddy_backup" ]]; then
+    mv "$caddy_backup" "$caddy_file"
+  else
+    rm -f "$caddy_file"
+  fi
+  echo '{"ok":false,"message":"Konfigurasi reverse proxy tidak valid."}'
+  exit 70
+fi
+
+if ! systemctl reload caddy; then
+  if [[ -f "$caddy_backup" ]]; then
+    mv "$caddy_backup" "$caddy_file"
+  else
+    rm -f "$caddy_file"
+  fi
+  systemctl reload caddy || true
+  echo '{"ok":false,"message":"Reverse proxy gagal dimuat ulang."}'
+  exit 71
+fi
+
+rm -f "$caddy_backup"
+
+if docker container inspect "$final_container" >/dev/null 2>&1; then
+  docker rm -f "$final_container" >/dev/null
+fi
+
+docker rename "$candidate" "$final_container"
+trap - ERR
+
+printf '%s\t%s\t%s\t%s\t%s\n'   "$(date -u +%FT%TZ)" "$project" "$release_id" "$branch" "$domain" >> "$log_file"
+
+mapfile -t old_releases < <(find "$project_root/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2-)
+for old_release in "${old_releases[@]}"; do
+  [[ "$old_release" == "$project_root/releases/"* ]] && rm -rf -- "$old_release"
+done
+
+printf '{"ok":true,"message":"Deployment berhasil.","project":"%s","release":"%s","url":"https://%s"}\n'   "$project" "$release_id" "$domain"
