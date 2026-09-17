@@ -121,6 +121,11 @@ Sebelum dipakai sebagai layanan publik, tambahkan akun/token per mahasiswa, audi
     └── php-native/index.php
 ```
 
+## Bahan ajar
+
+- [Modul praktikum lengkap](docs/PRAKTIKUM.md)
+- [Panduan troubleshooting](docs/TROUBLESHOOTING.md)
+
 ## Skenario praktikum 100 menit
 
 | Waktu | Kegiatan |
