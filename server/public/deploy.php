@@ -135,6 +135,12 @@ if (!is_dir($uploadDirectory) || !move_uploaded_file((string) $_FILES['artifact'
     respond(500, ['ok' => false, 'message' => 'Server gagal menyimpan artifact.']);
 }
 
+register_shutdown_function(static function () use ($uploadPath): void {
+    if (is_file($uploadPath)) {
+        unlink($uploadPath);
+    }
+});
+
 try {
     $command = sprintf(
         'sudo /usr/local/sbin/autodeploy-project %s %s %s %s 2>&1',
