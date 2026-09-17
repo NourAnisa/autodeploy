@@ -1,0 +1,63 @@
+name: Validasi AutoDeploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Ambil source code
+        uses: actions/checkout@v4
+
+      - name: Periksa sintaks shell
+        run: |
+          shellcheck server/install.sh
+          shellcheck server/bin/autodeploy-project
+          bash -n server/install.sh
+          bash -n server/bin/autodeploy-project
+
+      - name: Periksa sintaks PHP
+        run: |
+          docker run --rm \
+            --volume "$PWD:/work:ro" \
+            --workdir /work \
+            php:8.3-cli \
+            php -l server/public/deploy.php
+
+          docker run --rm \
+            --volume "$PWD:/work:ro" \
+            --workdir /work \
+            php:8.3-cli \
+            php -l examples/php-native/index.php
+
+      - name: Build dan uji aplikasi contoh
+        run: |
+          docker build \
+            --file server/templates/php-native/Dockerfile \
+            --tag autodeploy-smoke-test \
+            examples/php-native
+
+          container_id="$(docker run -d --publish 127.0.0.1::80 autodeploy-smoke-test)"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+
+          port="$(docker port "$container_id" 80/tcp | awk -F: 'NR==1 {print $NF}')"
+
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error "http://127.0.0.1:$port/" | grep -q "Hello, AutoDeploy"; then
+              echo "Smoke test berhasil pada percobaan $attempt"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$container_id"
+          exit 1
