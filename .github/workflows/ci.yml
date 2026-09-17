@@ -21,9 +21,13 @@ jobs:
       - name: Periksa sintaks shell
         run: |
           shellcheck server/install.sh
+          shellcheck server/install-local.sh
           shellcheck server/bin/autodeploy-project
+          shellcheck examples/deploy-local.sh
           bash -n server/install.sh
+          bash -n server/install-local.sh
           bash -n server/bin/autodeploy-project
+          bash -n examples/deploy-local.sh
 
       - name: Periksa sintaks PHP
         run: |
