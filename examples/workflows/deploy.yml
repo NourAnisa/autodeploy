@@ -1,0 +1,74 @@
+name: Deploy PHP Native
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Ambil source code
+        uses: actions/checkout@v4
+
+      - name: Validasi konfigurasi
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          PROJECT_SLUG: ${{ secrets.PROJECT_SLUG }}
+        run: |
+          test -n "$DEPLOY_URL" || { echo "Secret DEPLOY_URL belum diisi"; exit 1; }
+          test -n "$DEPLOY_TOKEN" || { echo "Secret DEPLOY_TOKEN belum diisi"; exit 1; }
+          test -n "$PROJECT_SLUG" || { echo "Secret PROJECT_SLUG belum diisi"; exit 1; }
+          [[ "$PROJECT_SLUG" =~ ^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$ ]] || {
+            echo "PROJECT_SLUG harus 3-40 karakter: huruf kecil, angka, atau tanda hubung"
+            exit 1
+          }
+
+      - name: Buat paket aplikasi
+        run: |
+          zip -qr application.zip . \
+            -x ".git/*" \
+               ".github/*" \
+               "application.zip" \
+               "*.log" \
+               ".env" \
+               ".env.*"
+
+      - name: Kirim ke AutoDeploy
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          PROJECT_SLUG: ${{ secrets.PROJECT_SLUG }}
+        run: |
+          response_file="$(mktemp)"
+          http_code="$(
+            curl --silent --show-error \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
+              --request POST "$DEPLOY_URL" \
+              --header "Authorization: Bearer $DEPLOY_TOKEN" \
+              --form "project=$PROJECT_SLUG" \
+              --form "branch=$GITHUB_REF_NAME" \
+              --form "commit=$GITHUB_SHA" \
+              --form "artifact=@application.zip;type=application/zip"
+          )"
+
+          cat "$response_file"
+          echo
+
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "Deployment gagal dengan HTTP $http_code"
+            exit 1
+          fi
